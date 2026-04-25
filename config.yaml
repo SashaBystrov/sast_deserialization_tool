@@ -1,0 +1,41 @@
+rules:
+  sources:
+    - input
+    - os.getenv
+    - request.get_json
+    - request.data
+    - open
+
+  propagation_functions:
+    - base64.b64decode
+    - base64.urlsafe_b64decode
+    - bytes
+    - str
+
+  sinks:
+    - module: pickle
+      methods: [load, loads]
+
+    - module: _pickle
+      methods: [load, loads]
+
+    - module: dill
+      methods: [load, loads]
+
+    - module: cloudpickle
+      methods: [load, loads]
+
+    - module: marshal
+      methods: [load, loads]
+
+    - module: shelve
+      methods: [open]
+
+    - module: jsonpickle
+      methods: [decode, loads]
+
+    - module: yaml
+      methods: [load, full_load, unsafe_load]
+      safe_arguments:
+        - SafeLoader
+        - yaml.SafeLoader
