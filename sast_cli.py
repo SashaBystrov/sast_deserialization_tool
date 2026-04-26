@@ -63,6 +63,12 @@ def main() -> None:
         help="Путь к файлу для сохранения отчёта"
     )
 
+    parser.add_argument(
+    "--no-fail",
+    action="store_true",
+    help="Не завершать выполнение с кодом 1 при обнаружении уязвимостей"
+    )
+
     try:
         target_path = Path(parser.parse_args().target)
         args = parser.parse_args()
@@ -84,7 +90,10 @@ def main() -> None:
         else:
             print(report)
 
-        sys.exit(1 if findings else 0)
+        if findings and not args.no_fail:
+            sys.exit(1)
+
+        sys.exit(0)
 
     except Exception as error:
         print(f"Ошибка выполнения анализа: {error}", file=sys.stderr)
