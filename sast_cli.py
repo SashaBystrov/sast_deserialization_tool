@@ -63,12 +63,6 @@ def main() -> None:
         help="Путь к файлу для сохранения отчёта"
     )
 
-    parser.add_argument(
-    "--no-fail",
-    action="store_true",
-    help="Не завершать выполнение с кодом 1 при обнаружении уязвимостей"
-    )
-
     try:
         target_path = Path(parser.parse_args().target)
         args = parser.parse_args()
