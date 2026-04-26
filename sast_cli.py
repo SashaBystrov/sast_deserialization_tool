@@ -4,7 +4,7 @@ from pathlib import Path
 
 from sast_tool.analyzer import analyze_file
 from sast_tool.config_loader import load_config
-from sast_tool.reporter import findings_to_console, findings_to_json
+from sast_tool.reporter import findings_to_console, findings_to_json, findings_to_sarif
 
 
 def collect_python_files(path: Path) -> list[Path]:
@@ -52,7 +52,7 @@ def main() -> None:
     parser.add_argument(
         "-f",
         "--format",
-        choices=["console", "json"],
+        choices=["console", "json", "sarif"],
         default="console",
         help="Формат вывода результатов"
     )
@@ -74,6 +74,8 @@ def main() -> None:
 
         if args.format == "json":
             report = findings_to_json(findings)
+        elif args.format == "sarif":
+            report = findings_to_sarif(findings)
         else:
             report = findings_to_console(findings)
 
