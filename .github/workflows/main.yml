@@ -2,8 +2,9 @@ name: Python SAST Deserialization Check
 
 on:
   push:
-    branches: [ main ]
+    branches: [ dev_branch ]
   pull_request:
+    branches: [ master]
 
 jobs:
   sast:
