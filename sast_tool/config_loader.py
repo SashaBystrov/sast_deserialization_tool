@@ -5,50 +5,69 @@ import yaml
 REQUIRED_RULE_SECTIONS = {"sources", "propagation_functions", "sinks"}
 
 
-def load_config(path: str | Path) -> dict:
-    config_path = Path(path)
+def load_analysis_config(config_path: str | Path) -> dict:
+    """
+    Load and validate YAML configuration for the SAST tool.
+    """
+
+    config_path = Path(config_path)
 
     if not config_path.exists():
-        raise FileNotFoundError(f"Конфигурационный файл не найден: {config_path}")
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
-    with config_path.open("r", encoding="utf-8") as file:
-        data = yaml.safe_load(file)
+    with config_path.open("r", encoding="utf-8") as config_file:
+        config_data = yaml.safe_load(config_file)
 
-    if not isinstance(data, dict) or "rules" not in data:
-        raise ValueError("Конфигурационный файл должен содержать раздел 'rules'")
+    if not isinstance(config_data, dict) or "rules" not in config_data:
+        raise ValueError("Configuration must contain a top-level 'rules' section")
 
-    rules = data["rules"]
+    rules = config_data["rules"]
 
     if not isinstance(rules, dict):
-        raise ValueError("Раздел 'rules' должен быть словарём")
+        raise ValueError("The 'rules' section must be a dictionary")
 
     missing_sections = REQUIRED_RULE_SECTIONS - set(rules.keys())
     if missing_sections:
-        raise ValueError(f"В конфигурации отсутствуют разделы: {missing_sections}")
+        raise ValueError(
+            f"Missing required rule sections: {', '.join(sorted(missing_sections))}"
+        )
 
     return rules
 
 
-def build_sink_set(rules: dict) -> set[str]:
-    sinks = set()
+def build_sink_function_set(analysis_rules: dict) -> set[str]:
+    """
+    Convert sink definitions into a set of fully qualified function names.
+    Example: 'pickle.loads'
+    """
 
-    for sink in rules.get("sinks", []):
-        module = sink["module"]
-        for method in sink.get("methods", []):
-            sinks.add(f"{module}.{method}")
+    sink_functions: set[str] = set()
 
-    return sinks
+    for sink_definition in analysis_rules.get("sinks", []):
+        module_name = sink_definition["module"]
+
+        for method_name in sink_definition.get("methods", []):
+            sink_functions.add(f"{module_name}.{method_name}")
+
+    return sink_functions
 
 
-def get_safe_arguments(rules: dict, function_name: str) -> set[str]:
-    safe_arguments = set()
+def get_safe_argument_values(analysis_rules: dict, function_name: str) -> set[str]:
+    """
+    Retrieve safe argument values for a specific sink function.
+    Example: yaml.SafeLoader
+    """
 
-    for sink in rules.get("sinks", []):
-        module = sink.get("module")
-        methods = sink.get("methods", [])
+    safe_values: set[str] = set()
 
-        for method in methods:
-            if f"{module}.{method}" == function_name:
-                safe_arguments.update(sink.get("safe_arguments", []))
+    for sink_definition in analysis_rules.get("sinks", []):
+        module_name = sink_definition.get("module")
+        methods = sink_definition.get("methods", [])
 
-    return safe_arguments
+        for method_name in methods:
+            qualified_name = f"{module_name}.{method_name}"
+
+            if qualified_name == function_name:
+                safe_values.update(sink_definition.get("safe_arguments", []))
+
+    return safe_values
