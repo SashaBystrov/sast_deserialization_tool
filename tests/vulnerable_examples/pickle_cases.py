@@ -115,14 +115,14 @@ pickle.loads(payload_18)
 
 
 # 19. Контейнер: значение внутри словаря
-# Для текущей версии может НЕ обнаруживаться без поддержки Subscript.
+# Для текущей версии может обнаруживаться без поддержки Subscript.
 data_19 = input()
 container_19 = {"payload": data_19}
 pickle.loads(container_19["payload"])
 
 
 # 20. Контейнер: значение внутри списка
-# Для текущей версии может НЕ обнаруживаться без поддержки Subscript.
+# Для текущей версии может обнаруживаться без поддержки Subscript.
 data_20 = input()
 container_20 = [data_20]
 pickle.loads(container_20[0])
@@ -153,7 +153,7 @@ pickle.loads(b"constant_payload")
 
 
 # 25. Условное присваивание: одна ветка tainted
-# Желательно обнаруживать.
+# ОБНАРУЖИВАЕТСЯ.
 flag_25 = True
 if flag_25:
     data_25 = input()

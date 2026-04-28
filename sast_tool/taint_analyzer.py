@@ -12,7 +12,6 @@ class FunctionSummary:
     return_parameter_indexes: set[int] = field(default_factory=set)
     sink_parameter_indexes: dict[ast.Call, set[int]] = field(default_factory=dict)
 
-
 class TaintAnalyzer:
     """
     Performs taint propagation and checks whether tainted data reaches
@@ -52,7 +51,10 @@ class TaintAnalyzer:
         self.tainted_variables: set[str] = set()
         self.findings: list[Finding] = []
 
-    def build_local_dependency_map(self, function_node: ast.FunctionDef) -> dict[str, set[str]]:
+    def build_local_dependency_map(
+            self,
+            function_node: ast.FunctionDef,
+    ) -> dict[str, set[str]]:
         local_dependencies: dict[str, set[str]] = {}
 
         for child_node in ast.walk(function_node):
@@ -63,7 +65,10 @@ class TaintAnalyzer:
             dependency_variables = self.extract_variable_dependencies(child_node.value)
 
             for target_variable in target_variables:
-                local_dependencies.setdefault(target_variable, set()).update(dependency_variables)
+                local_dependencies.setdefault(
+                    target_variable,
+                    set()
+                ).update(dependency_variables)
 
         return local_dependencies
 
@@ -83,20 +88,30 @@ class TaintAnalyzer:
 
             resolved_dependencies.add(current_variable)
 
-            for dependency in local_dependencies.get(current_variable, set()):
-                if dependency not in resolved_dependencies:
-                    stack.append(dependency)
+            for dependency_variable in local_dependencies.get(current_variable, set()):
+                if dependency_variable not in resolved_dependencies:
+                    stack.append(dependency_variable)
 
         return resolved_dependencies
+
     def analyze(self) -> list[Finding]:
         self.function_summaries = self.build_function_summaries()
-        self.apply_function_return_flows()
 
-        propagated_taint = self.data_flow_graph.propagate_taint(
-            self.initial_tainted_variables
-        )
+        previous_tainted_variables: set[str] = set()
 
-        self.tainted_variables = propagated_taint - self.safely_overwritten_variables
+        for _ in range(len(self.assignment_nodes) + 1):
+            self.apply_function_return_flows()
+
+            propagated_taint = self.data_flow_graph.propagate_taint(
+                self.initial_tainted_variables
+            )
+
+            self.tainted_variables = propagated_taint - self.safely_overwritten_variables
+
+            if self.tainted_variables == previous_tainted_variables:
+                break
+
+            previous_tainted_variables = set(self.tainted_variables)
 
         self.check_direct_sink_calls()
         self.check_user_function_sink_calls()
@@ -131,13 +146,13 @@ class TaintAnalyzer:
                 if self.expression_contains_source(child_node.value):
                     summary.returns_tainted_source = True
 
-                returned_variables = self.extract_variable_dependencies(child_node.value)
+                returned_dependencies = self.extract_variable_dependencies(child_node.value)
                 resolved_return_dependencies: set[str] = set()
 
-                for returned_variable in returned_variables:
+                for dependency in returned_dependencies:
                     resolved_return_dependencies.update(
                         self.resolve_local_dependencies(
-                            variable_name=returned_variable,
+                            variable_name=dependency,
                             local_dependencies=local_dependencies,
                         )
                     )
@@ -147,9 +162,9 @@ class TaintAnalyzer:
                         summary.return_parameter_indexes.add(parameter_index)
 
             if isinstance(child_node, ast.Call):
-                function_name = self.resolve_qualified_name(child_node.func)
+                called_function_name = self.resolve_qualified_name(child_node.func)
 
-                if function_name not in self.get_sink_function_names():
+                if called_function_name not in self.get_sink_function_names():
                     continue
 
                 for argument in child_node.args:
@@ -168,7 +183,7 @@ class TaintAnalyzer:
                         if parameter_name in resolved_argument_dependencies:
                             summary.sink_parameter_indexes.setdefault(
                                 child_node,
-                                set(),
+                                set()
                             ).add(parameter_index)
 
         return summary
@@ -197,15 +212,13 @@ class TaintAnalyzer:
 
                     argument = assignment_node.value.args[parameter_index]
 
-                    for dependency in self.extract_variable_dependencies(argument):
+                    for dependency_variable in self.extract_variable_dependencies(argument):
                         self.data_flow_graph.add_dependency(
-                            source_variable=dependency,
+                            source_variable=dependency_variable,
                             target_variable=target_variable,
                         )
 
-                    if self.is_tainted_expression(argument):
-                        self.initial_tainted_variables.add(target_variable)
-                        self.safely_overwritten_variables.discard(target_variable)
+                    self.safely_overwritten_variables.discard(target_variable)
 
     def check_direct_sink_calls(self) -> None:
         for sink_call in self.detected_sink_calls:

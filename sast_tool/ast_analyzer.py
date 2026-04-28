@@ -64,6 +64,7 @@ class DeserializationASTAnalyzer(ast.NodeVisitor):
         self.conditional_depth -= 1
 
     def visit_Assign(self, node: ast.Assign) -> None:
+        self.assignment_nodes.append(node)
         target_variables = self.extract_assignment_targets(node.targets)
         dependency_variables = self.extract_variable_dependencies(node.value)
 
