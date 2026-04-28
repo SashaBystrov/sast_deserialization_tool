@@ -51,7 +51,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     argument_parser.add_argument(
         "-c",
         "--config",
-        default="config.yaml",
+        default="rules/config.yaml",
         help="Path to the YAML configuration file with analysis rules"
     )
 

@@ -32,7 +32,7 @@ jobs:
       - name: Run SAST deserialization analyzer
         continue-on-error: true
         run: |
-            python sast_cli.py . --config config.yaml --format sarif --output sast_report.sarif --no-fail
+            python sast_cli.py . --config rules/config.yaml --format sarif --output sast_report.sarif --no-fail
         
       - name: Upload SARIF report
         if: always() && hashFiles('sast_report.sarif') != ''

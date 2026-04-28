@@ -44,6 +44,7 @@ def findings_to_console(findings: list[Finding]) -> str:
         lines.append(f"    Line:     {finding.line_number}")
         lines.append(f"    Library:  {finding.library_name}")
         lines.append(f"    Function: {finding.function_name}")
+        lines.append(f"    Resolved: {finding.resolved_function_name}")
         lines.append(f"    Severity: {finding.severity}")
         lines.append(f"    Rule ID:  {finding.rule_id}")
         lines.append("-" * 72)
@@ -132,6 +133,7 @@ def finding_to_sarif_result(finding: Finding) -> dict:
         "properties": {
             "library": finding.library_name,
             "function": finding.function_name,
+            "resolved_function": finding.resolved_function_name,
             "severity": finding.severity,
             "cwe": "CWE-502",
         },

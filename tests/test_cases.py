@@ -118,3 +118,89 @@ pickle.loads(data_14)
 data_15 = input()
 container_15 = {"payload": data_15}
 pickle.loads(container_15["payload"])
+
+# 27. Interprocedural: source is returned from a function
+def get_payload_27():
+    return input()
+
+data_27 = get_payload_27()
+pickle.loads(data_27)
+
+
+# 28. Interprocedural: user-defined propagation function
+def normalize_28(value):
+    return value
+
+data_28 = input()
+payload_28 = normalize_28(data_28)
+pickle.loads(payload_28)
+
+
+# 29. Interprocedural: wrapper function contains sink
+def deserialize_29(value):
+    return pickle.loads(value)
+
+data_29 = input()
+deserialize_29(data_29)
+
+
+# 30. Interprocedural: source -> user-defined propagation -> sink wrapper
+def get_payload_30():
+    return input()
+
+def normalize_30(value):
+    return base64.b64decode(value)
+
+def deserialize_30(value):
+    return pickle.loads(value)
+
+raw_30 = get_payload_30()
+payload_30 = normalize_30(raw_30)
+deserialize_30(payload_30)
+
+
+# 31. Interprocedural: safe constant returned from function
+# Should NOT be detected.
+def get_safe_payload_31():
+    return b"constant_payload"
+
+data_31 = get_safe_payload_31()
+pickle.loads(data_31)
+
+
+# 32. Interprocedural: safe value passed to sink wrapper
+# Should NOT be detected.
+def deserialize_32(value):
+    return pickle.loads(value)
+
+safe_32 = b"constant_payload"
+deserialize_32(safe_32)
+
+
+# 33. Interprocedural: second argument is tainted
+def deserialize_second_arg_33(prefix, payload):
+    return pickle.loads(payload)
+
+safe_prefix_33 = "safe"
+data_33 = input()
+deserialize_second_arg_33(safe_prefix_33, data_33)
+
+
+# 34. Interprocedural: first argument is safe, second is safe
+# Should NOT be detected.
+def deserialize_second_arg_34(prefix, payload):
+    return pickle.loads(payload)
+
+safe_prefix_34 = "safe"
+safe_payload_34 = b"constant_payload"
+deserialize_second_arg_34(safe_prefix_34, safe_payload_34)
+
+
+# 35. Interprocedural: tainted value returned through parameter after assignment
+def normalize_35(value):
+    temp = value
+    return temp
+
+data_35 = input()
+payload_35 = normalize_35(data_35)
+pickle.loads(payload_35)
