@@ -1,6 +1,6 @@
 import json
-
 from .models import Finding
+
 
 
 SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
@@ -10,6 +10,17 @@ TOOL_NAME = "Python Unsafe Deserialization SAST"
 TOOL_INFORMATION_URI = "https://example.local"
 
 DEFAULT_RULE_ID = "sast.python.unsafe_deserialization"
+
+CLR = {
+    "HEADER": "\033[95m",
+    "BLUE": "\033[94m",
+    "CYAN": "\033[96m",
+    "GREEN": "\033[92m",
+    "YELLOW": "\033[93m",
+    "RED": "\033[91m",
+    "END": "\033[0m",
+    "BOLD": "\033[1m",
+}
 
 
 def findings_to_json(findings: list[Finding]) -> str:
@@ -26,30 +37,42 @@ def findings_to_json(findings: list[Finding]) -> str:
 def findings_to_console(findings: list[Finding]) -> str:
     lines: list[str] = []
 
-    lines.append("=" * 72)
-    lines.append("Unsafe Deserialization SAST Report")
-    lines.append("=" * 72)
+    header_line = "=" * 72
+    lines.append(f"{CLR['HEADER']}{header_line}")
+    lines.append(f"PYTHON UNSAFE DESERIALIZATION SAST REPORT")
+    lines.append(f"{header_line}{CLR['END']}")
 
     if not findings:
-        lines.append("Result: no vulnerabilities found.")
-        lines.append("=" * 72)
+        lines.append(f"{CLR['GREEN']}Result: No vulnerabilities found.{CLR['END']}")
+        lines.append(f"{CLR['HEADER']}{header_line}{CLR['END']}")
         return "\n".join(lines)
 
-    lines.append(f"Total findings: {len(findings)}")
+    lines.append(f"{CLR['BOLD']}Total findings: {len(findings)}{CLR['END']}")
     lines.append("-" * 72)
 
     for index, finding in enumerate(findings, start=1):
-        lines.append(f"[{index}] {finding.description}")
-        lines.append(f"    File:     {finding.file_path}")
-        lines.append(f"    Line:     {finding.line_number}")
-        lines.append(f"    Library:  {finding.library_name}")
-        lines.append(f"    Function: {finding.function_name}")
-        lines.append(f"    Resolved: {finding.resolved_function_name}")
-        lines.append(f"    Severity: {finding.severity}")
-        lines.append(f"    Rule ID:  {finding.rule_id}")
+        lines.append(f"{CLR['RED']}{CLR['BOLD']}[{index}] {finding.description}{CLR['END']}")
+
+        lines.append(f"    {CLR['CYAN']}File:{CLR['END']}      {finding.file_path}")
+        lines.append(f"    {CLR['CYAN']}Line:{CLR['END']}      {finding.line_number}")
+        lines.append(f"    {CLR['CYAN']}Library:{CLR['END']}   {finding.library_name}")
+        # Добавляем название функции и её разрешённое имя
+        lines.append(f"    {CLR['CYAN']}Function:{CLR['END']}  {finding.function_name}")
+        lines.append(f"    {CLR['CYAN']}Resolved:{CLR['YELLOW']} {finding.resolved_function_name}{CLR['END']}")
+        lines.append(f"    {CLR['CYAN']}Severity:{CLR['END']}  {CLR['RED']}{finding.severity}{CLR['END']}")
+
+        if finding.taint_trace:
+            lines.append(f"    {CLR['BLUE']}Taint Trace:{CLR['END']}")
+            # Формируем красивую цепочку через стрелки
+            path_elements = [f"{CLR['BOLD']}{node}{CLR['END']}" for node in finding.taint_trace]
+            trace_visualization = f" {CLR['BLUE']}→{CLR['END']} ".join(path_elements)
+            lines.append(f"    {trace_visualization}")
+
         lines.append("-" * 72)
 
     return "\n".join(lines)
+
+
 
 
 def findings_to_sarif(findings: list[Finding]) -> str:

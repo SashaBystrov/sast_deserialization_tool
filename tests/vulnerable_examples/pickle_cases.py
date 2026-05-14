@@ -6,6 +6,9 @@ import base64
 import os
 
 
+
+
+
 # 1. Прямой пользовательский ввод -> pickle.loads
 data_1 = input()
 pickle.loads(data_1)
