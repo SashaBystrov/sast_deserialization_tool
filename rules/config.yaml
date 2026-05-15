@@ -16,9 +16,6 @@ rules:
     - module: pickle
       methods: [load, loads]
 
-    - module: _pickle
-      methods: [load, loads]
-
     - module: dill
       methods: [load, loads]
 

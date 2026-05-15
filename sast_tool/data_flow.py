@@ -1,65 +1,84 @@
-from dataclasses import dataclass, field
+from collections import deque
 
 
-@dataclass
 class DataFlowGraph:
     """
-    Направленный граф, используемый для представления зависимостей данных между переменными.
+    Directed graph representing variable data dependencies.
+
+    Example:
+        a = input()
+        b = a
+        c = b
+
+    Graph:
+        a -> b -> c
     """
 
-    edges: dict[str, set[str]] = field(default_factory=dict)
-    reverse_edges: dict[str, set[str]] = field(default_factory=dict)
+    def __init__(self) -> None:
+        self.adjacency_list: dict[str, set[str]] = {}
 
     def add_dependency(self, source_variable: str, target_variable: str) -> None:
         """
-        Добавляет зависимость данных между двумя переменными[cite: 7].
+        Register a dependency between two variables.
         """
-        # Прямой граф для распространения пометок
-        self.edges.setdefault(source_variable, set()).add(target_variable)
 
-        # Реверсивный граф для восстановления пути (trace)[cite: 7]
-        self.reverse_edges.setdefault(target_variable, set()).add(source_variable)
+        self.adjacency_list.setdefault(
+            source_variable,
+            set(),
+        ).add(target_variable)
 
-    def propagate_taint(self, initially_tainted_variables: set[str]) -> set[str]:
+    def propagate_taint(
+        self,
+        initial_tainted_variables: set[str],
+    ) -> set[str]:
         """
-        Распространяет метки "загрязненности" по графу до достижения стабильного состояния[cite: 7].
+        Propagate taint labels through the graph until a fixed point is reached.
         """
-        tainted_variables = set(initially_tainted_variables)
-        has_changes = True
 
-        while has_changes:
-            has_changes = False
+        tainted_variables = set(initial_tainted_variables)
+        queue = deque(initial_tainted_variables)
 
-            for source_variable, target_variables in self.edges.items():
-                if source_variable not in tainted_variables:
+        while queue:
+            current_variable = queue.popleft()
+
+            for dependent_variable in self.adjacency_list.get(current_variable, set()):
+                if dependent_variable in tainted_variables:
                     continue
 
-                for target_variable in target_variables:
-                    if target_variable not in tainted_variables:
-                        tainted_variables.add(target_variable)
-                        has_changes = True
+                tainted_variables.add(dependent_variable)
+                queue.append(dependent_variable)
 
         return tainted_variables
 
-    def get_taint_path(self, source_variables: set[str], target_variable: str) -> list[str]:
+    def get_taint_path(
+        self,
+        source_variable: str,
+        target_variable: str,
+    ) -> list[str]:
+        """
+        Return one dependency path between source and target variables.
+        """
+
+        queue = deque([(source_variable, [source_variable])])
         visited = set()
-        path: list[str] = []
 
-        def dfs(current: str) -> bool:
-            if current in visited:
-                return False
-            visited.add(current)
+        while queue:
+            current_variable, path = queue.popleft()
 
-            # Если дошли до источника, начинаем строить путь[cite: 7]
-            if current in source_variables:
-                path.append(current)
-                return True
+            if current_variable == target_variable:
+                return path
 
-            for parent in self.reverse_edges.get(current, []):
-                if dfs(parent):
-                    path.append(current)  # Добавляем текущий узел ПОСЛЕ родителя[cite: 7]
-                    return True
-            return False
+            if current_variable in visited:
+                continue
 
-        dfs(target_variable)
-        return path  # Убираем reversed, если логика dfs уже строит путь от источника[cite: 7]
+            visited.add(current_variable)
+
+            for dependent_variable in self.adjacency_list.get(current_variable, set()):
+                queue.append(
+                    (
+                        dependent_variable,
+                        path + [dependent_variable],
+                    )
+                )
+
+        return []

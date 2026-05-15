@@ -8,7 +8,7 @@ from .models import Finding
 
 @dataclass
 class FunctionSummary:
-    returns_tainted_source: bool = False
+    returns_source: bool = False
     return_parameter_indexes: set[int] = field(default_factory=set)
     sink_parameter_indexes: dict[ast.Call, set[int]] = field(default_factory=dict)
 
@@ -17,27 +17,27 @@ class TaintAnalyzer:
     def __init__(
         self,
         source_file: str,
-        analysis_rules: dict,
+        rules: dict,
         import_aliases: dict[str, str],
         data_flow_graph: DataFlowGraph,
         initial_tainted_variables: set[str],
         safely_overwritten_variables: set[str],
-        detected_sink_calls: list[ast.Call],
+        sink_calls: list[ast.Call],
         function_definitions: dict[str, ast.FunctionDef],
         assignment_nodes: list[ast.Assign],
         call_nodes: list[ast.Call],
     ):
         self.source_file = source_file
-        self.analysis_rules = analysis_rules
+        self.rules = rules
         self.import_aliases = import_aliases
         self.data_flow_graph = data_flow_graph
 
-        self.source_functions = set(analysis_rules.get("sources", []))
-        self.propagation_functions = set(analysis_rules.get("propagation_functions", []))
+        self.source_functions = set(rules.get("sources", []))
+        self.propagation_functions = set(rules.get("propagation_functions", []))
 
         self.initial_tainted_variables = initial_tainted_variables
         self.safely_overwritten_variables = safely_overwritten_variables
-        self.detected_sink_calls = detected_sink_calls
+        self.sink_calls = sink_calls
 
         self.function_definitions = function_definitions
         self.assignment_nodes = assignment_nodes
@@ -47,354 +47,396 @@ class TaintAnalyzer:
         self.tainted_variables: set[str] = set()
         self.findings: list[Finding] = []
 
-    # =========================
-    # ANALYSIS ENTRYPOINT
-    # =========================
-
     def analyze(self) -> list[Finding]:
         self.function_summaries = self.build_function_summaries()
+        self.apply_function_return_flows()
 
-        previous_tainted_variables: set[str] = set()
-
-        for _ in range(len(self.assignment_nodes) + 1):
-            self.apply_function_return_flows()
-
-            propagated = self.data_flow_graph.propagate_taint(
-                self.initial_tainted_variables
-            )
-
-            self.tainted_variables = propagated - self.safely_overwritten_variables
-
-            if self.tainted_variables == previous_tainted_variables:
-                break
-
-            previous_tainted_variables = set(self.tainted_variables)
+        self.tainted_variables = (
+            self.data_flow_graph.propagate_taint(self.initial_tainted_variables)
+            - self.safely_overwritten_variables
+        )
 
         self.check_direct_sink_calls()
         self.check_user_function_sink_calls()
 
         return self.findings
 
-    # =========================
-    # FUNCTION SUMMARIES
-    # =========================
-
     def build_function_summaries(self) -> dict[str, FunctionSummary]:
-        summaries = {}
+        summaries: dict[str, FunctionSummary] = {}
 
-        for name, node in self.function_definitions.items():
-            summaries[name] = self.build_single_function_summary(node)
+        for function_name, function_node in self.function_definitions.items():
+            summaries[function_name] = self.build_function_summary(function_node)
 
         return summaries
 
-    def build_single_function_summary(self, function_node: ast.FunctionDef) -> FunctionSummary:
+    def build_function_summary(self, function_node: ast.FunctionDef) -> FunctionSummary:
         summary = FunctionSummary()
+        parameter_indexes = {
+            argument.arg: index
+            for index, argument in enumerate(function_node.args.args)
+        }
 
-        param_names = [arg.arg for arg in function_node.args.args]
-        param_indexes = {name: i for i, name in enumerate(param_names)}
-
-        local_deps = self.build_local_dependency_map(function_node)
+        local_dependencies = self.build_local_dependency_map(function_node)
 
         for node in ast.walk(function_node):
-            # RETURN
             if isinstance(node, ast.Return) and node.value:
-                if self.expression_contains_source(node.value):
-                    summary.returns_tainted_source = True
+                self.update_return_summary(
+                    summary=summary,
+                    return_node=node,
+                    parameter_indexes=parameter_indexes,
+                    local_dependencies=local_dependencies,
+                )
 
-                deps = self.extract_variable_dependencies(node.value)
-                resolved = set()
-
-                for d in deps:
-                    resolved |= self.resolve_local_dependencies(d, local_deps)
-
-                for p_name, p_idx in param_indexes.items():
-                    if p_name in resolved:
-                        summary.return_parameter_indexes.add(p_idx)
-
-            # INTERNAL SINK
             if isinstance(node, ast.Call):
-                func_name = self.resolve_qualified_name(node.func)
-
-                if func_name not in self.get_sink_function_names():
-                    continue
-
-                for arg in node.args:
-                    deps = self.extract_variable_dependencies(arg)
-                    resolved = set()
-
-                    for d in deps:
-                        resolved |= self.resolve_local_dependencies(d, local_deps)
-
-                    for p_name, p_idx in param_indexes.items():
-                        if p_name in resolved:
-                            summary.sink_parameter_indexes.setdefault(node, set()).add(p_idx)
+                self.update_sink_summary(
+                    summary=summary,
+                    call_node=node,
+                    parameter_indexes=parameter_indexes,
+                    local_dependencies=local_dependencies,
+                )
 
         return summary
 
-    # =========================
-    # DATA FLOW INSIDE FUNCTIONS
-    # =========================
+    def update_return_summary(
+        self,
+        summary: FunctionSummary,
+        return_node: ast.Return,
+        parameter_indexes: dict[str, int],
+        local_dependencies: dict[str, set[str]],
+    ) -> None:
+        if self.expression_contains_source(return_node.value):
+            summary.returns_source = True
 
-    def build_local_dependency_map(self, function_node):
-        deps = {}
+        dependencies = self.resolve_expression_dependencies(
+            return_node.value,
+            local_dependencies,
+        )
+
+        for parameter_name, parameter_index in parameter_indexes.items():
+            if parameter_name in dependencies:
+                summary.return_parameter_indexes.add(parameter_index)
+
+    def update_sink_summary(
+        self,
+        summary: FunctionSummary,
+        call_node: ast.Call,
+        parameter_indexes: dict[str, int],
+        local_dependencies: dict[str, set[str]],
+    ) -> None:
+        function_name = self.resolve_qualified_name(call_node.func)
+
+        if function_name not in self.get_sink_function_names():
+            return
+
+        for argument in call_node.args:
+            dependencies = self.resolve_expression_dependencies(
+                argument,
+                local_dependencies,
+            )
+
+            for parameter_name, parameter_index in parameter_indexes.items():
+                if parameter_name in dependencies:
+                    summary.sink_parameter_indexes.setdefault(
+                        call_node,
+                        set(),
+                    ).add(parameter_index)
+
+    def build_local_dependency_map(
+        self,
+        function_node: ast.FunctionDef,
+    ) -> dict[str, set[str]]:
+        dependencies: dict[str, set[str]] = {}
 
         for node in ast.walk(function_node):
-            if isinstance(node, ast.Assign):
-                targets = self.extract_assignment_targets(node.targets)
-                sources = self.extract_variable_dependencies(node.value)
+            if not isinstance(node, ast.Assign):
+                continue
 
-                for t in targets:
-                    deps.setdefault(t, set()).update(sources)
+            targets = self.extract_assignment_targets(node.targets)
+            sources = self.extract_variable_dependencies(node.value)
 
-        return deps
+            for target in targets:
+                dependencies.setdefault(target, set()).update(sources)
 
-    def resolve_local_dependencies(self, var, deps):
-        visited = set()
-        stack = [var]
+        return dependencies
+
+    def resolve_expression_dependencies(
+        self,
+        node: ast.AST,
+        local_dependencies: dict[str, set[str]],
+    ) -> set[str]:
+        resolved_dependencies: set[str] = set()
+
+        for variable in self.extract_variable_dependencies(node):
+            resolved_dependencies.update(
+                self.resolve_local_dependencies(variable, local_dependencies)
+            )
+
+        return resolved_dependencies
+
+    def resolve_local_dependencies(
+        self,
+        variable: str,
+        local_dependencies: dict[str, set[str]],
+    ) -> set[str]:
+        resolved: set[str] = set()
+        stack = [variable]
 
         while stack:
             current = stack.pop()
-            if current in visited:
+
+            if current in resolved:
                 continue
 
-            visited.add(current)
+            resolved.add(current)
 
-            for d in deps.get(current, set()):
-                if d not in visited:
-                    stack.append(d)
+            for dependency in local_dependencies.get(current, set()):
+                stack.append(dependency)
 
-        return visited
+        return resolved
 
-    # =========================
-    # INTERPROCEDURAL FLOW
-    # =========================
-
-    def apply_function_return_flows(self):
-        for assign in self.assignment_nodes:
-            if not isinstance(assign.value, ast.Call):
+    def apply_function_return_flows(self) -> None:
+        for assignment in self.assignment_nodes:
+            if not isinstance(assignment.value, ast.Call):
                 continue
 
-            fname = self.resolve_qualified_name(assign.value.func)
+            function_name = self.resolve_qualified_name(assignment.value.func)
 
-            if fname not in self.function_summaries:
+            if function_name not in self.function_summaries:
                 continue
 
-            summary = self.function_summaries[fname]
-            targets = self.extract_assignment_targets(assign.targets)
+            summary = self.function_summaries[function_name]
+            targets = self.extract_assignment_targets(assignment.targets)
 
-            for t in targets:
-                if summary.returns_tainted_source:
-                    self.initial_tainted_variables.add(t)
-                    self.safely_overwritten_variables.discard(t)
+            for target in targets:
+                if summary.returns_source:
+                    self.initial_tainted_variables.add(target)
+                    self.safely_overwritten_variables.discard(target)
 
-                for idx in summary.return_parameter_indexes:
-                    if idx >= len(assign.value.args):
+                for parameter_index in summary.return_parameter_indexes:
+                    if parameter_index >= len(assignment.value.args):
                         continue
 
-                    arg = assign.value.args[idx]
+                    argument = assignment.value.args[parameter_index]
 
-                    for dep in self.extract_variable_dependencies(arg):
-                        self.data_flow_graph.add_dependency(dep, t)
+                    for dependency in self.extract_variable_dependencies(argument):
+                        self.data_flow_graph.add_dependency(
+                            source_variable=dependency,
+                            target_variable=target,
+                        )
 
-                    self.safely_overwritten_variables.discard(t)
+                    self.safely_overwritten_variables.discard(target)
 
-    # =========================
-    # SINK CHECKING
-    # =========================
+    def check_direct_sink_calls(self) -> None:
+        for sink_call in self.sink_calls:
+            function_name = self.resolve_qualified_name(sink_call.func)
 
-    def check_direct_sink_calls(self):
-        for call in self.detected_sink_calls:
-            fname = self.resolve_qualified_name(call.func)
-
-            if not fname:
+            if not function_name:
                 continue
 
-            if self.has_safe_argument(fname, call):
+            if self.has_safe_argument(function_name, sink_call):
                 continue
 
-            if self.has_tainted_argument(call):
-                self.add_finding(call, fname)
+            if self.has_tainted_argument(sink_call):
+                self.add_finding(sink_call, function_name)
 
-    def check_user_function_sink_calls(self):
+    def check_user_function_sink_calls(self) -> None:
         for call in self.call_nodes:
-            fname = self.resolve_qualified_name(call.func)
+            function_name = self.resolve_qualified_name(call.func)
 
-            if fname not in self.function_summaries:
+            if function_name not in self.function_summaries:
                 continue
 
-            summary = self.function_summaries[fname]
+            summary = self.function_summaries[function_name]
 
-            for sink_call, indexes in summary.sink_parameter_indexes.items():
-                for idx in indexes:
-                    if idx >= len(call.args):
+            for sink_call, parameter_indexes in summary.sink_parameter_indexes.items():
+                for parameter_index in parameter_indexes:
+                    if parameter_index >= len(call.args):
                         continue
 
-                    if self.is_tainted_expression(call.args[idx]):
+                    if self.is_tainted_expression(call.args[parameter_index]):
                         sink_name = self.resolve_qualified_name(sink_call.func)
+
                         if sink_name:
                             self.add_interprocedural_finding(call, sink_name)
 
-    # =========================
-    # FINDINGS + TRACE
-    # =========================
-
-    def add_finding(self, call, resolved_name):
-        trace = self.build_taint_trace(call)
-
+    def add_finding(self, call: ast.Call, resolved_function_name: str) -> None:
         self.findings.append(
             Finding(
                 file_path=self.source_file,
                 line_number=getattr(call.func, "lineno", getattr(call, "lineno", 0)),
-                function_name=self.get_source_call_name(call.func) or resolved_name,
-                resolved_function_name=resolved_name,
-                library_name=resolved_name.split(".")[0],
+                function_name=self.get_source_call_name(call.func) or resolved_function_name,
+                resolved_function_name=resolved_function_name,
+                library_name=resolved_function_name.split(".")[0],
                 description="Untrusted data is passed to a deserialization function",
-                taint_trace=trace,
+                taint_trace=self.build_taint_trace(call),
             )
         )
 
-    def add_interprocedural_finding(self, call, resolved_name):
-        trace = self.build_taint_trace(call)
-
+    def add_interprocedural_finding(
+        self,
+        call: ast.Call,
+        resolved_function_name: str,
+    ) -> None:
         self.findings.append(
             Finding(
                 file_path=self.source_file,
                 line_number=getattr(call.func, "lineno", getattr(call, "lineno", 0)),
-                function_name=self.get_source_call_name(call.func) or resolved_name,
-                resolved_function_name=resolved_name,
-                library_name=resolved_name.split(".")[0],
+                function_name=self.get_source_call_name(call.func) or resolved_function_name,
+                resolved_function_name=resolved_function_name,
+                library_name=resolved_function_name.split(".")[0],
                 description="Untrusted data is passed to a deserialization function",
-                taint_trace=trace,
+                taint_trace=self.build_taint_trace(call),
             )
         )
 
-    def build_taint_trace(self, call):
-        for arg in call.args:
-            deps = self.extract_variable_dependencies(arg)
+    def build_taint_trace(self, call: ast.Call) -> list[str]:
+        for argument in call.args:
+            for variable in self.extract_variable_dependencies(argument):
+                if variable in self.tainted_variables:
+                    for source in self.initial_tainted_variables:
+                        path = self.data_flow_graph.get_taint_path(
+                            source_variable=source,
+                            target_variable=variable,
+                        )
 
-            for var in deps:
-                if var in self.tainted_variables:
-                    return self.data_flow_graph.get_taint_path(
-                        source_variables=self.initial_tainted_variables,
-                        target_variable=var
-                    )
+                        if path:
+                            return path
+
         return []
 
-    # =========================
-    # HELPERS
-    # =========================
+    def has_tainted_argument(self, call: ast.Call) -> bool:
+        return any(
+            self.is_tainted_expression(argument)
+            for argument in call.args
+        )
 
-    def resolve_qualified_name(self, node):
+    def is_tainted_expression(self, node: ast.AST) -> bool:
         if isinstance(node, ast.Name):
-            return self.import_aliases.get(node.id, node.id)
-
-        if isinstance(node, ast.Attribute):
-            base = self.resolve_qualified_name(node.value)
-            if base:
-                return f"{base}.{node.attr}"
-
-        return None
-
-    def get_source_call_name(self, node):
-        if isinstance(node, ast.Name):
-            return node.id
-
-        if isinstance(node, ast.Attribute):
-            base = self.get_source_call_name(node.value)
-            if base:
-                return f"{base}.{node.attr}"
-
-        return None
-
-    def has_tainted_argument(self, node):
-        return any(self.is_tainted_expression(arg) for arg in node.args)
-
-    def is_tainted_expression(self, node):
-
+            return node.id in self.tainted_variables
 
         if isinstance(node, ast.Subscript):
             return self.is_tainted_expression(node.value)
 
         if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
-            return any(self.is_tainted_expression(e) for e in node.elts)
+            return any(
+                self.is_tainted_expression(element)
+                for element in node.elts
+            )
 
         if isinstance(node, ast.Dict):
             return any(
-                v is not None and self.is_tainted_expression(v)
-                for v in node.values
+                value is not None and self.is_tainted_expression(value)
+                for value in node.values
             )
 
         if isinstance(node, ast.Call):
-            fname = self.resolve_qualified_name(node.func)
+            function_name = self.resolve_qualified_name(node.func)
 
-            if fname in self.source_functions:
+            if function_name in self.source_functions:
                 return True
 
-            if fname in self.propagation_functions:
-                return any(self.is_tainted_expression(arg) for arg in node.args)
+            if function_name in self.propagation_functions:
+                return any(
+                    self.is_tainted_expression(argument)
+                    for argument in node.args
+                )
 
-            if fname in self.function_summaries:
-                summary = self.function_summaries[fname]
+            if function_name in self.function_summaries:
+                summary = self.function_summaries[function_name]
 
-                if summary.returns_tainted_source:
+                if summary.returns_source:
                     return True
 
-                for idx in summary.return_parameter_indexes:
-                    if idx < len(node.args):
-                        if self.is_tainted_expression(node.args[idx]):
+                for parameter_index in summary.return_parameter_indexes:
+                    if parameter_index < len(node.args):
+                        if self.is_tainted_expression(node.args[parameter_index]):
                             return True
 
         if isinstance(node, ast.Attribute):
-            attr = self.resolve_qualified_name(node)
-            return attr in self.source_functions if attr else False
-
-        if isinstance(node, ast.Name):
-            return node.id in self.tainted_variables
+            attribute_name = self.resolve_qualified_name(node)
+            return attribute_name in self.source_functions if attribute_name else False
 
         return False
 
-    def expression_contains_source(self, node):
+    def expression_contains_source(self, node: ast.AST) -> bool:
         for child in ast.walk(node):
             if isinstance(child, ast.Call):
-                fname = self.resolve_qualified_name(child.func)
-                if fname in self.source_functions:
+                function_name = self.resolve_qualified_name(child.func)
+
+                if function_name in self.source_functions:
+                    return True
+
+            if isinstance(child, ast.Attribute):
+                attribute_name = self.resolve_qualified_name(child)
+
+                if attribute_name in self.source_functions:
                     return True
 
         return False
 
-    def extract_assignment_targets(self, targets):
-        result = set()
-        for t in targets:
-            if isinstance(t, ast.Name):
-                result.add(t.id)
-        return result
-
-    def extract_variable_dependencies(self, node):
-        result = set()
-        for child in ast.walk(node):
-            if isinstance(child, ast.Name):
-                result.add(child.id)
-        return result
-
-    def has_safe_argument(self, fname, node):
-        safe_values = get_safe_argument_values(self.analysis_rules, fname)
+    def has_safe_argument(self, function_name: str, call: ast.Call) -> bool:
+        safe_values = get_safe_argument_values(self.rules, function_name)
 
         if not safe_values:
             return False
 
-        for kw in node.keywords:
-            val = self.resolve_qualified_name(kw.value)
-            if val in safe_values:
+        for keyword in call.keywords:
+            value_name = self.resolve_qualified_name(keyword.value)
+
+            if value_name in safe_values:
                 return True
 
         return False
 
-    def get_sink_function_names(self):
-        result = set()
+    def resolve_qualified_name(self, node: ast.AST) -> str | None:
+        if isinstance(node, ast.Name):
+            return self.import_aliases.get(node.id, node.id)
 
-        for sink in self.analysis_rules.get("sinks", []):
-            module = sink.get("module")
-            for method in sink.get("methods", []):
-                result.add(f"{module}.{method}")
+        if isinstance(node, ast.Attribute):
+            base_name = self.resolve_qualified_name(node.value)
+
+            if base_name:
+                return f"{base_name}.{node.attr}"
+
+        return None
+
+    def get_source_call_name(self, node: ast.AST) -> str | None:
+        if isinstance(node, ast.Name):
+            return node.id
+
+        if isinstance(node, ast.Attribute):
+            base_name = self.get_source_call_name(node.value)
+
+            if base_name:
+                return f"{base_name}.{node.attr}"
+
+        return None
+
+    def extract_assignment_targets(self, targets: list[ast.expr]) -> set[str]:
+        result: set[str] = set()
+
+        for target in targets:
+            if isinstance(target, ast.Name):
+                result.add(target.id)
+
+        return result
+
+    def extract_variable_dependencies(self, node: ast.AST) -> set[str]:
+        result: set[str] = set()
+
+        for child in ast.walk(node):
+            if isinstance(child, ast.Name):
+                result.add(child.id)
+
+        return result
+
+    def get_sink_function_names(self) -> set[str]:
+        result: set[str] = set()
+
+        for sink in self.rules.get("sinks", []):
+            module_name = sink.get("module")
+
+            for method_name in sink.get("methods", []):
+                result.add(f"{module_name}.{method_name}")
 
         return result

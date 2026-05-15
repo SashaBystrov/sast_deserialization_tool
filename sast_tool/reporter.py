@@ -56,14 +56,12 @@ def findings_to_console(findings: list[Finding]) -> str:
         lines.append(f"    {CLR['CYAN']}File:{CLR['END']}      {finding.file_path}")
         lines.append(f"    {CLR['CYAN']}Line:{CLR['END']}      {finding.line_number}")
         lines.append(f"    {CLR['CYAN']}Library:{CLR['END']}   {finding.library_name}")
-        # Добавляем название функции и её разрешённое имя
         lines.append(f"    {CLR['CYAN']}Function:{CLR['END']}  {finding.function_name}")
         lines.append(f"    {CLR['CYAN']}Resolved:{CLR['YELLOW']} {finding.resolved_function_name}{CLR['END']}")
         lines.append(f"    {CLR['CYAN']}Severity:{CLR['END']}  {CLR['RED']}{finding.severity}{CLR['END']}")
 
         if finding.taint_trace:
             lines.append(f"    {CLR['BLUE']}Taint Trace:{CLR['END']}")
-            # Формируем красивую цепочку через стрелки
             path_elements = [f"{CLR['BOLD']}{node}{CLR['END']}" for node in finding.taint_trace]
             trace_visualization = f" {CLR['BLUE']}→{CLR['END']} ".join(path_elements)
             lines.append(f"    {trace_visualization}")
@@ -137,7 +135,7 @@ def build_sarif_rule() -> dict:
 def finding_to_sarif_result(finding: Finding) -> dict:
     return {
         "ruleId": finding.rule_id,
-        "level": sarif_level_from_severity(finding.severity),
+        "level": "error",
         "message": {
             "text": finding.description
         },
@@ -161,14 +159,3 @@ def finding_to_sarif_result(finding: Finding) -> dict:
             "cwe": "CWE-502",
         },
     }
-
-
-def sarif_level_from_severity(severity: str) -> str:
-    severity_mapping = {
-        "LOW": "note",
-        "MEDIUM": "warning",
-        "HIGH": "error",
-        "CRITICAL": "error",
-    }
-
-    return severity_mapping.get(severity.upper(), "warning")
