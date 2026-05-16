@@ -63,7 +63,7 @@ def findings_to_console(findings: list[Finding]) -> str:
         if finding.taint_trace:
             lines.append(f"    {CLR['BLUE']}Taint Trace:{CLR['END']}")
             path_elements = [f"{CLR['BOLD']}{node}{CLR['END']}" for node in finding.taint_trace]
-            trace_visualization = f" {CLR['BLUE']}→{CLR['END']} ".join(path_elements)
+            trace_visualization = f" {CLR['BLUE']}->{CLR['END']} ".join(path_elements)
             lines.append(f"    {trace_visualization}")
 
         lines.append("-" * 72)
