@@ -4,7 +4,7 @@ on:
   push:
     branches: [ dev_branch ]
   pull_request:
-    branches: [ master]
+    branches: [ master ]
 
 jobs:
   sast:
@@ -30,15 +30,14 @@ jobs:
           pip install pyyaml
 
       - name: Run SAST deserialization analyzer
-        continue-on-error: true
         run: |
-            python sast_cli.py . --config config.yaml --format sarif --output sast_report.sarif --no-fail
-        
+          python sast_cli.py . --config rules/config.yaml --format sarif --output sast_report.sarif --exit-zero
+
       - name: Upload SARIF report
         if: always() && hashFiles('sast_report.sarif') != ''
         uses: github/codeql-action/upload-sarif@v3
         with:
-            sarif_file: sast_report.sarif
+          sarif_file: sast_report.sarif
 
       - name: Fail if vulnerabilities found
         run: |

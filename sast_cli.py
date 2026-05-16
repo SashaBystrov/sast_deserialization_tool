@@ -11,7 +11,7 @@ from sast_tool.reporter import (
 )
 
 
-def collect_python_source_files(target_path: Path) -> list[Path]:
+def collect_python_files(target_path: Path) -> list[Path]:
     if target_path.is_file() and target_path.suffix == ".py":
         return [target_path]
 
@@ -22,40 +22,38 @@ def collect_python_source_files(target_path: Path) -> list[Path]:
 
 
 def analyze_target(target_path: Path, config_path: Path) -> list:
-    analysis_rules = load_analysis_config(config_path)
-    python_files = collect_python_source_files(target_path)
+    rules = load_analysis_config(config_path)
+    python_files = collect_python_files(target_path)
 
     if not python_files:
-        raise FileNotFoundError("No Python source files found for analysis")
+        raise FileNotFoundError("No Python files found for analysis")
 
-    analysis_findings = []
+    findings = []
 
-    for source_file_path in python_files:
-        analysis_findings.extend(
-            analyze_file(source_file_path, analysis_rules)
-        )
+    for file_path in python_files:
+        findings.extend(analyze_file(file_path, rules))
 
-    return analysis_findings
+    return findings
 
 
-def build_argument_parser() -> argparse.ArgumentParser:
-    argument_parser = argparse.ArgumentParser(
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
         description="Static analysis tool for detecting unsafe deserialization in Python code"
     )
 
-    argument_parser.add_argument(
+    parser.add_argument(
         "target",
         help="Path to a Python file or project directory"
     )
 
-    argument_parser.add_argument(
+    parser.add_argument(
         "-c",
         "--config",
-        default="config.yaml",
-        help="Path to the YAML configuration file with analysis rules"
+        default="rules/config.yaml",
+        help="Path to the YAML configuration file"
     )
 
-    argument_parser.add_argument(
+    parser.add_argument(
         "-f",
         "--format",
         choices=["console", "json", "sarif"],
@@ -63,22 +61,22 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Output format"
     )
 
-    argument_parser.add_argument(
+    parser.add_argument(
         "-o",
         "--output",
-        help="Path to save the analysis report"
+        help="Path to save the report"
     )
 
-    argument_parser.add_argument(
+    parser.add_argument(
         "--exit-zero",
         action="store_true",
-        help="Always return exit code 0, even if vulnerabilities are found"
+        help="Always return exit code 0, even if findings are detected"
     )
 
-    return argument_parser
+    return parser
 
 
-def format_analysis_report(findings: list, output_format: str) -> str:
+def format_report(findings: list, output_format: str) -> str:
     if output_format == "json":
         return findings_to_json(findings)
 
@@ -88,36 +86,36 @@ def format_analysis_report(findings: list, output_format: str) -> str:
     return findings_to_console(findings)
 
 
-def write_or_print_report(report_content: str, output_path: str | None) -> None:
+def write_report(report: str, output_path: str | None) -> None:
     if output_path:
-        Path(output_path).write_text(report_content, encoding="utf-8")
+        Path(output_path).write_text(report, encoding="utf-8")
         return
 
-    print(report_content)
+    print(report)
 
 
 def main() -> None:
-    argument_parser = build_argument_parser()
+    parser = build_parser()
 
     try:
-        cli_arguments = argument_parser.parse_args()
+        args = parser.parse_args()
 
-        analysis_findings = analyze_target(
-            target_path=Path(cli_arguments.target),
-            config_path=Path(cli_arguments.config),
+        findings = analyze_target(
+            target_path=Path(args.target),
+            config_path=Path(args.config),
         )
 
-        report_content = format_analysis_report(
-            findings=analysis_findings,
-            output_format=cli_arguments.format,
+        report = format_report(
+            findings=findings,
+            output_format=args.format,
         )
 
-        write_or_print_report(
-            report_content=report_content,
-            output_path=cli_arguments.output,
+        write_report(
+            report=report,
+            output_path=args.output,
         )
 
-        if analysis_findings and not cli_arguments.exit_zero:
+        if findings and not args.exit_zero:
             sys.exit(1)
 
         sys.exit(0)
